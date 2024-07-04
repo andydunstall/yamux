@@ -1,3 +1,3 @@
-module github.com/hashicorp/yamux
+module github.com/andydunstall/yamux
 
-go 1.15
+go 1.22
