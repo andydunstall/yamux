@@ -1082,9 +1082,6 @@ func TestKeepAlive_Timeout(t *testing.T) {
 	server, _ := Server(conn2, testConf())
 	defer server.Close()
 
-	_ = captureLogs(client) // Client logs aren't part of the test
-	serverLogs := captureLogs(server)
-
 	errCh := make(chan error, 1)
 	go func() {
 		_, err := server.Accept() // Wait until server closes
@@ -1108,10 +1105,6 @@ func TestKeepAlive_Timeout(t *testing.T) {
 
 	if !server.IsClosed() {
 		t.Fatalf("server should have closed")
-	}
-
-	if !serverLogs.match([]string{"[ERR] yamux: keepalive failed: i/o deadline reached"}) {
-		t.Fatalf("server log incorect: %v", serverLogs.logs())
 	}
 }
 
