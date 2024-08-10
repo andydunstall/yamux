@@ -10,7 +10,6 @@ import (
 	"log"
 	"math"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -368,7 +367,6 @@ func (s *Session) keepalive() {
 			_, err := s.Ping()
 			if err != nil {
 				if err != ErrSessionShutdown {
-					s.logger.Printf("[ERR] yamux: keepalive failed: %v", err)
 					s.exitErr(ErrKeepAliveTimeout)
 				}
 				return
@@ -487,7 +485,6 @@ func (s *Session) sendLoop() error {
 			if ready.Hdr != nil {
 				_, err := s.conn.Write(ready.Hdr)
 				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write header: %v", err)
 					asyncSendErr(ready.Err, err)
 					return err
 				}
@@ -501,7 +498,6 @@ func (s *Session) sendLoop() error {
 				if err != nil {
 					ready.Body = nil
 					ready.mu.Unlock()
-					s.logger.Printf("[ERR] yamux: Failed to copy body into buffer: %v", err)
 					asyncSendErr(ready.Err, err)
 					return err
 				}
@@ -513,7 +509,6 @@ func (s *Session) sendLoop() error {
 				// Send data from a body if given
 				_, err := s.conn.Write(bodyBuf.Bytes())
 				if err != nil {
-					s.logger.Printf("[ERR] yamux: Failed to write body: %v", err)
 					asyncSendErr(ready.Err, err)
 					return err
 				}
@@ -551,9 +546,6 @@ func (s *Session) recvLoop() error {
 	for {
 		// Read the header
 		if _, err := io.ReadFull(s.bufRead, hdr); err != nil {
-			if err != io.EOF && !strings.Contains(err.Error(), "closed") && !strings.Contains(err.Error(), "reset by peer") {
-				s.logger.Printf("[ERR] yamux: Failed to read header: %v", err)
-			}
 			return err
 		}
 
@@ -662,13 +654,10 @@ func (s *Session) handleGoAway(hdr header) error {
 	case goAwayNormal:
 		atomic.SwapInt32(&s.remoteGoAway, 1)
 	case goAwayProtoErr:
-		s.logger.Printf("[ERR] yamux: received protocol error go away")
 		return fmt.Errorf("yamux protocol error")
 	case goAwayInternalErr:
-		s.logger.Printf("[ERR] yamux: received internal error go away")
 		return fmt.Errorf("remote yamux internal error")
 	default:
-		s.logger.Printf("[ERR] yamux: received unexpected go away")
 		return fmt.Errorf("unexpected go away received")
 	}
 	return nil
@@ -691,7 +680,6 @@ func (s *Session) incomingStream(id uint32) error {
 
 	// Check if stream already exists
 	if _, ok := s.streams[id]; ok {
-		s.logger.Printf("[ERR] yamux: duplicate stream declared")
 		if sendErr := s.sendNoWait(s.goAway(goAwayProtoErr)); sendErr != nil {
 			s.logger.Printf("[WARN] yamux: failed to send go away: %v", sendErr)
 		}
