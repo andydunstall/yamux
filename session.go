@@ -71,6 +71,9 @@ type Session struct {
 	recvDoneCh chan struct{}
 	sendDoneCh chan struct{}
 
+	// localGoAwayCh is closed when localGoAway is set to 1.
+	localGoAwayCh chan struct{}
+
 	// shutdown is used to safely close a session
 	shutdown        bool
 	shutdownErr     error
@@ -96,19 +99,20 @@ func newSession(config *Config, conn io.ReadWriteCloser, client bool) *Session {
 	}
 
 	s := &Session{
-		config:     config,
-		logger:     logger,
-		conn:       conn,
-		bufRead:    bufio.NewReader(conn),
-		pings:      make(map[uint32]chan struct{}),
-		streams:    make(map[uint32]*Stream),
-		inflight:   make(map[uint32]struct{}),
-		synCh:      make(chan struct{}, config.AcceptBacklog),
-		acceptCh:   make(chan *Stream, config.AcceptBacklog),
-		sendCh:     make(chan *sendReady, 64),
-		recvDoneCh: make(chan struct{}),
-		sendDoneCh: make(chan struct{}),
-		shutdownCh: make(chan struct{}),
+		config:        config,
+		logger:        logger,
+		conn:          conn,
+		bufRead:       bufio.NewReader(conn),
+		pings:         make(map[uint32]chan struct{}),
+		streams:       make(map[uint32]*Stream),
+		inflight:      make(map[uint32]struct{}),
+		synCh:         make(chan struct{}, config.AcceptBacklog),
+		acceptCh:      make(chan *Stream, config.AcceptBacklog),
+		sendCh:        make(chan *sendReady, 64),
+		recvDoneCh:    make(chan struct{}),
+		sendDoneCh:    make(chan struct{}),
+		localGoAwayCh: make(chan struct{}),
+		shutdownCh:    make(chan struct{}),
 	}
 	if client {
 		s.nextStreamID = 1
@@ -245,6 +249,9 @@ func (s *Session) AcceptStream() (*Stream, error) {
 			return nil, err
 		}
 		return stream, nil
+	case <-s.localGoAwayCh:
+		// No longer accepting connections.
+		return nil, net.ErrClosed
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
 	}
@@ -261,6 +268,9 @@ func (s *Session) AcceptStreamWithContext(ctx context.Context) (*Stream, error) 
 			return nil, err
 		}
 		return stream, nil
+	case <-s.localGoAwayCh:
+		// No longer accepting connections.
+		return nil, net.ErrClosed
 	case <-s.shutdownCh:
 		return nil, s.shutdownErr
 	}
@@ -316,7 +326,9 @@ func (s *Session) GoAway() error {
 
 // goAway is used to send a goAway message
 func (s *Session) goAway(reason uint32) header {
-	atomic.SwapInt32(&s.localGoAway, 1)
+	if atomic.SwapInt32(&s.localGoAway, 1) == 0 {
+		close(s.localGoAwayCh)
+	}
 	hdr := header(make([]byte, headerSize))
 	hdr.encode(typeGoAway, 0, 0, reason)
 	return hdr
